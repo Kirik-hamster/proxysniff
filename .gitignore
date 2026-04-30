@@ -1,0 +1,25 @@
+# Скомпилированные исполняемые файлы
+sniffer
+proxysniff
+*.out
+*.o
+
+# Объектные файлы и линковка
+*.obj
+*.ilk
+*.pdb
+
+# Папки сборки
+build/
+Debug/
+Release/
+
+# Файлы редакторов
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Системные файлы
+.DS_Store
+Thumbs.db
