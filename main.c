@@ -1,7 +1,22 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <linux/if_packet.h>
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+#include <signal.h>
 
 #define VERSION "0.1.0"
+
+volatile sig_atomic_t running = 1;
+
+void sigint_handler(int sig) {
+    (void)sig;
+    running = 0;
+}
 
 void print_help(const char *progname) {
     printf("Usage: %s [OPTIONS]\n", progname);
@@ -25,14 +40,66 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // Основной режим (по умолчанию или --sniff)
-    printf("proxysniff %s - Network sniffer mode\n", VERSION);
-    printf("Initializing raw socket... (not yet implemented)\n");
-    printf("Listening on interface eth0...\n");
-    printf("Waiting for packets... (Ctrl+C to stop)\n\n");
+    printf("proxysniff %s - Starting sniffer...\n", VERSION);
 
-    // Здесь в будущем будет бесконечный цикл захвата пакетов
-    // while (1) { ... }
+    int raw_sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (raw_sock == -1) {
+        perror("socket() failed");
+        return 1;
+    }
+    printf("[+] Raw socket created\n");
 
+    const char *iface = "wlx088af11b4cd1";
+    unsigned int ifindex = if_nametoindex(iface);
+    if (ifindex == 0) {
+        fprintf(stderr, "Interface %s not found. Use 'ip link' to check.\n", iface);
+        close(raw_sock);
+        return 1;
+    }
+
+    struct packet_mreq mreq;
+    mreq.mr_ifindex = ifindex;
+    mreq.mr_type = PACKET_MR_PROMISC;
+    if (setsockopt(raw_sock, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == -1) {
+        perror("setsockopt promisc failed");
+    } else {
+        printf("[+] Interface %s set to promiscuous mode\n", iface);
+    }
+
+    struct sockaddr_ll sll;
+    memset(&sll, 0, sizeof(sll));
+    sll.sll_family = AF_PACKET;
+    sll.sll_ifindex = ifindex;
+    if (bind(raw_sock, (struct sockaddr *)&sll, sizeof(sll)) == -1) {
+        perror("bind failed");
+        close(raw_sock);
+        return 1;
+    }
+    printf("[+] Bound to interface %s\n", iface);
+
+    signal(SIGINT, sigint_handler);
+
+    printf("[*] Listening on %s... (Ctrl+C to stop)\n\n", iface);
+    while (running) {
+        unsigned char buffer[65536];
+        struct sockaddr_ll src_addr;
+        socklen_t addr_len = sizeof(src_addr);
+        ssize_t packet_size = recvfrom(raw_sock, buffer, sizeof(buffer), 0,
+                                       (struct sockaddr *)&src_addr, &addr_len);
+        if (packet_size == -1) {
+            perror("recvfrom failed");
+            break;
+        }
+
+        printf(">>> Packet captured! Size: %ld bytes\n", packet_size);
+        printf("First 20 bytes: ");
+        for (int i = 0; i < 20 && i < packet_size; i++) {
+            printf("%02x ", buffer[i]);
+        }
+        printf("\n\n");
+    }
+
+    close(raw_sock);
+    printf("[+] Socket closed. Sniffer done.\n");
     return 0;
 }
