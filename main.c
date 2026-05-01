@@ -2,14 +2,16 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <linux/if_packet.h>
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <arpa/inet.h>
-#include <signal.h>
+#include "packet.h"
 
 #define VERSION "0.1.0"
+#define ENV_FILE ".env"
 
 volatile sig_atomic_t running = 1;
 
@@ -27,6 +29,32 @@ void print_help(const char *progname) {
     printf("  --sniff       Start packet sniffer (default if no arguments)\n");
 }
 
+/**
+ * read_env — прочитать значение переменной IFACE из .env файла.
+ * @iface: буфер, куда будет записано имя интерфейса
+ * @size: размер буфера
+ * Возвращает 0 при успехе, -1 если файл не найден или ключ отсутствует.
+ */
+int read_env(char *iface, size_t size) {
+    FILE *f = fopen(ENV_FILE, "r");
+    if (!f) return -1;
+
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        // Убираем символ новой строки
+        line[strcspn(line, "\r\n")] = '\0';
+        // Ищем строку, начинающуюся с IFACE=
+        if (strncmp(line, "IFACE=", 6) == 0) {
+            strncpy(iface, line + 6, size - 1);
+            iface[size - 1] = '\0';
+            fclose(f);
+            return 0;
+        }
+    }
+    fclose(f);
+    return -1;
+}
+
 int main(int argc, char *argv[]) {
     // Если передан аргумент --help
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
@@ -40,7 +68,15 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    printf("proxysniff %s - Starting sniffer...\n", VERSION);
+    // Читаем имя интерфейса из .env
+    char iface[32];
+    if (read_env(iface, sizeof(iface)) != 0) {
+        fprintf(stderr, "Could not read IFACE from " ENV_FILE "\n");
+        fprintf(stderr, "Create a .env file with content: IFACE=your_interface_name\n");
+        return 1;
+    }
+
+    printf("proxysniff %s - Starting sniffer on %s...\n", VERSION, iface);
 
     int raw_sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (raw_sock == -1) {
@@ -49,7 +85,6 @@ int main(int argc, char *argv[]) {
     }
     printf("[+] Raw socket created\n");
 
-    const char *iface = "wlx088af11b4cd1";
     unsigned int ifindex = if_nametoindex(iface);
     if (ifindex == 0) {
         fprintf(stderr, "Interface %s not found. Use 'ip link' to check.\n", iface);
@@ -91,12 +126,9 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        printf(">>> Packet captured! Size: %ld bytes\n", packet_size);
-        printf("First 20 bytes: ");
-        for (int i = 0; i < 20 && i < packet_size; i++) {
-            printf("%02x ", buffer[i]);
-        }
-        printf("\n\n");
+        struct ether_header *eth = (struct ether_header *)buffer;
+        uint16_t etype = ntohs(eth->ether_type);
+        process_packet(buffer, etype); 
     }
 
     close(raw_sock);
