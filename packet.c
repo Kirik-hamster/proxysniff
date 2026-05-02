@@ -6,6 +6,12 @@
 #include <netinet/udp.h>
 #include "packet.h"
 
+// IntelliSense: отключаем ложные ошибки на tcphdr и TH_*
+#ifdef __INTELLISENSE__
+#pragma diag_suppress 833
+#pragma diag_suppress 20
+#endif
+
 // Вывести MAC-адреса и тип Ethernet-фрейма.
 static void parse_ethernet(const unsigned char *buffer) {
     struct ether_header *eth = (struct ether_header *)buffer;
@@ -26,14 +32,15 @@ static void parse_ethernet(const unsigned char *buffer) {
 
 // Вывести IP-адреса, TTL и протокол из IPv4-заголовка.
 static void parse_ip(const unsigned char *buffer) {
-    struct ip *ip = (struct ip *)buffer;
+    struct iphdr *ip = (struct iphdr *)buffer;
     char src_ip[INET_ADDRSTRLEN], dst_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(ip->ip_src), src_ip, INET_ADDRSTRLEN);
-    inet_ntop(AF_INET, &(ip->ip_dst), dst_ip, INET_ADDRSTRLEN);
-    printf("IP: %s -> %s, TTL: %d, Protocol: %d", src_ip, dst_ip, ip->ip_ttl, ip->ip_p);
-    if (ip->ip_p == IPPROTO_TCP) printf(" (TCP)");
-    else if (ip->ip_p == IPPROTO_UDP) printf(" (UDP)");
-    else if (ip->ip_p == IPPROTO_ICMP) printf(" (ICMP)");
+    inet_ntop(AF_INET, &(ip->saddr), src_ip, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &(ip->daddr), dst_ip, INET_ADDRSTRLEN);
+    printf("IP: %s -> %s, TTL: %d, Protocol: %d",
+           src_ip, dst_ip, ip->ttl, ip->protocol);
+    if (ip->protocol == IPPROTO_TCP) printf(" (TCP)");
+    else if (ip->protocol == IPPROTO_UDP) printf(" (UDP)");
+    else if (ip->protocol == IPPROTO_ICMP) printf(" (ICMP)");
     printf("\n");
 }
 
@@ -41,28 +48,29 @@ static void parse_ip(const unsigned char *buffer) {
 static void parse_tcp_udp(const unsigned char *buffer, int protocol) {
     if (protocol == IPPROTO_TCP) {
         struct tcphdr *tcp = (struct tcphdr *)buffer;
-        printf("TCP ports: %d -> %d", ntohs(tcp->source), ntohs(tcp->dest));
-        if (tcp->syn) printf(" [SYN]");
-        if (tcp->ack) printf(" [ACK]");
-        if (tcp->fin) printf(" [FIN]");
+        printf("TCP ports: %d -> %d", ntohs(tcp->th_sport), ntohs(tcp->th_dport));
+        if (tcp->th_flags & TH_SYN) printf(" [SYN]");
+        if (tcp->th_flags & TH_ACK) printf(" [ACK]");
+        if (tcp->th_flags & TH_FIN) printf(" [FIN]");
         printf("\n");
     } else if (protocol == IPPROTO_UDP) {
         struct udphdr *udp = (struct udphdr *)buffer;
-        printf("UDP ports: %d -> %d\n", ntohs(udp->source), ntohs(udp->dest));
+        printf("UDP ports: %d -> %d\n", ntohs(udp->uh_sport), ntohs(udp->uh_dport));
     }
 }
 
-// Определяет тип пакета и вызывает соответствующие внутренние разборщики.
+// Определяет тип пакета и вызывает соответствующие разборщики
 void process_packet(const unsigned char *buffer, uint16_t etype) {
     parse_ethernet(buffer);
 
     if (etype == ETHERTYPE_IP) {
-        struct ip *ip = (struct ip *)(buffer + sizeof(struct ether_header));
-        parse_ip((unsigned char *)ip);
+        struct iphdr *iph = (struct iphdr *)(buffer + sizeof(struct ether_header));
+        parse_ip((unsigned char *)iph);
 
-        int ip_header_len = ip->ip_hl * 4;
-        if (ip->ip_p == IPPROTO_TCP || ip->ip_p == IPPROTO_UDP) {
-            parse_tcp_udp((unsigned char *)(buffer + sizeof(struct ether_header) + ip_header_len), ip->ip_p);
+        int ip_header_len = iph->ihl * 4;
+        if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
+            parse_tcp_udp((unsigned char *)(buffer + sizeof(struct ether_header) + ip_header_len),
+                          iph->protocol);
         }
     } else if (etype == ETHERTYPE_ARP) {
         printf("ARP packet\n");
