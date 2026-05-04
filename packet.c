@@ -4,6 +4,7 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#include<ctype.h>
 #include "packet.h"
 
 // IntelliSense: отключаем ложные ошибки на tcphdr и TH_*
@@ -59,25 +60,58 @@ static void parse_tcp_udp(const unsigned char *buffer, int protocol) {
     }
 }
 
+void print_payload(const unsigned char *payload, int len) {
+    for (int i = 0; i < len; i++) {
+        // Делаем красивые отступы, чтобы текст не слипался в кашу
+        if (i > 0 && i % 16 == 0) printf("  "); // Двойной пробел каждые 16 байт
+        if (i > 0 && i % 32 == 0) printf("\n"); // Перенос строки каждые 32 байта
+        
+        // Главная магия:
+        if (isprint(payload[i])) 
+            printf("%c", payload[i]); // Если байт — это буква, цифра или знак, печатаем как есть
+        else 
+            printf("."); // Если это служебный байт (0x00, 0x01 и т.д.), печатаем точку
+    }
+    printf("\n");
+}
+
 // Определяет тип пакета и вызывает соответствующие разборщики
-void process_packet(const unsigned char *buffer, uint16_t etype) {
-    parse_ethernet(buffer);
+void process_packet(const unsigned char *buffer, int packet_size) {
+    struct ether_header *eth = (struct ether_header *)buffer;
+    uint16_t etype = ntohs(eth->ether_type);
+
+    printf("\033[1;34m[Packet Captured: %d bytes]\033[0m\n", packet_size);
+    
+    // Вывод Ethernet
+    printf("  \033[1;32mEthernet:\033[0m %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x | Type: 0x%04x\n",
+           eth->ether_shost[0], eth->ether_shost[1], eth->ether_shost[2], eth->ether_shost[3], eth->ether_shost[4], eth->ether_shost[5],
+           eth->ether_dhost[0], eth->ether_dhost[1], eth->ether_dhost[2], eth->ether_dhost[3], eth->ether_dhost[4], eth->ether_dhost[5],
+           etype);
 
     if (etype == ETHERTYPE_IP) {
         struct iphdr *iph = (struct iphdr *)(buffer + sizeof(struct ether_header));
-        parse_ip((unsigned char *)iph);
+        char src_ip[INET_ADDRSTRLEN], dst_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(iph->saddr), src_ip, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &(iph->daddr), dst_ip, INET_ADDRSTRLEN);
 
-        int ip_header_len = iph->ihl * 4;
-        if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
-            parse_tcp_udp((unsigned char *)(buffer + sizeof(struct ether_header) + ip_header_len),
-                          iph->protocol);
+        printf("  \033[1;33mIPv4:\033[0m %s -> %s | TTL: %d | Protocol: %d\n", src_ip, dst_ip, iph->ttl, iph->protocol);
+
+        int head_len = iph->ihl * 4;
+        const unsigned char *payload = buffer + sizeof(struct ether_header) + head_len;
+        int payload_size = packet_size - (sizeof(struct ether_header) + head_len);
+
+        if (iph->protocol == IPPROTO_TCP) {
+            struct tcphdr *tcp = (struct tcphdr *)payload;
+            printf("    \033[1;36mTCP:\033[0m Port %d -> %d | Seq: %u | Ack: %u\n", 
+                   ntohs(tcp->th_sport), ntohs(tcp->th_dport), ntohl(tcp->th_seq), ntohl(tcp->th_ack));
+            
+            // Если есть данные после TCP заголовка — выводим их
+            int tcp_len = tcp->th_off * 4;
+            if (payload_size > tcp_len) {
+                printf("    \033[1;30mPayload (%d bytes):\033[0m\n", payload_size - tcp_len);
+                print_payload(payload + tcp_len, payload_size - tcp_len);
+            }
         }
-    } else if (etype == ETHERTYPE_ARP) {
-        printf("ARP packet\n");
-    } else if (etype == ETHERTYPE_IPV6) {
-        printf("IPv6 packet (parsing not implemented)\n");
-    } else {
-        printf("Unknown type\n");
     }
-    printf("----------------------------------------\n");
+    printf("------------------------------------------------------------------\n");
 }

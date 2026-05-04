@@ -15,14 +15,6 @@ Network sniffer and proxy utility — учебный проект на C.
 - Права root (нужны для raw socket)
 - gcc, make (build-essential)
 
-## Настройка
-
-Создайте в корне проекта файл `.env` и укажите имя активного сетевого интерфейса:
-
-```
-IFACE=your_interface_name
-```
-
 Имя интерфейса можно узнать командой `ip link`.
 
 ## Сборка и запуск

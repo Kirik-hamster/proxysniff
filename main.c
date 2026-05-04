@@ -8,10 +8,10 @@
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include "packet.h"
 
 #define VERSION "0.1.0"
-#define ENV_FILE ".env"
 
 volatile sig_atomic_t running = 1;
 
@@ -29,30 +29,38 @@ void print_help(const char *progname) {
     printf("  --sniff       Start packet sniffer (default if no arguments)\n");
 }
 
-/**
- * read_env — прочитать значение переменной IFACE из .env файла.
- * @iface: буфер, куда будет записано имя интерфейса
- * @size: размер буфера
- * Возвращает 0 при успехе, -1 если файл не найден или ключ отсутствует.
- */
-int read_env(char *iface, size_t size) {
-    FILE *f = fopen(ENV_FILE, "r");
-    if (!f) return -1;
+void select_interface(char *iface, size_t size) {
+    struct ifaddrs *addrs, *tmp;
+    getifaddrs(&addrs);
+    tmp = addrs;
 
-    char line[256];
-    while (fgets(line, sizeof(line), f)) {
-        // Убираем символ новой строки
-        line[strcspn(line, "\r\n")] = '\0';
-        // Ищем строку, начинающуюся с IFACE=
-        if (strncmp(line, "IFACE=", 6) == 0) {
-            strncpy(iface, line + 6, size - 1);
-            iface[size - 1] = '\0';
-            fclose(f);
-            return 0;
+    int i = 0;
+    printf("Available interfaces:\n");
+    while (tmp) {
+        if (tmp->ifa_addr && tmp->ifa_addr->sa_family == AF_PACKET) {
+            printf("[%d] %s\n", i++, tmp->ifa_name);
         }
+        tmp = tmp->ifa_next;
     }
-    fclose(f);
-    return -1;
+
+    int choice;
+    printf("Select interface index: ");
+    scanf("%d", &choice);
+
+    // Снова проходим по списку, чтобы найти выбранный индекс
+    tmp = addrs;
+    int curr = 0;
+    while (tmp) {
+        if (tmp->ifa_addr && tmp->ifa_addr->sa_family == AF_PACKET) {
+            if (curr == choice) {
+                strncpy(iface, tmp->ifa_name, size - 1);
+                break;
+            }
+            curr++;
+        }
+        tmp = tmp->ifa_next;
+    }
+    freeifaddrs(addrs);
 }
 
 int main(int argc, char *argv[]) {
@@ -68,13 +76,9 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // Читаем имя интерфейса из .env
+    // Выбор интерфейса
     char iface[32];
-    if (read_env(iface, sizeof(iface)) != 0) {
-        fprintf(stderr, "Could not read IFACE from " ENV_FILE "\n");
-        fprintf(stderr, "Create a .env file with content: IFACE=your_interface_name\n");
-        return 1;
-    }
+    select_interface(iface, sizeof(iface));
 
     printf("proxysniff %s - Starting sniffer on %s...\n", VERSION, iface);
 
