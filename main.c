@@ -121,18 +121,10 @@ int main(int argc, char *argv[]) {
     printf("[*] Listening on %s... (Ctrl+C to stop)\n\n", iface);
     while (running) {
         unsigned char buffer[65536];
-        struct sockaddr_ll src_addr;
-        socklen_t addr_len = sizeof(src_addr);
-        ssize_t packet_size = recvfrom(raw_sock, buffer, sizeof(buffer), 0,
-                                       (struct sockaddr *)&src_addr, &addr_len);
-        if (packet_size == -1) {
-            perror("recvfrom failed");
-            break;
+        ssize_t packet_size = recvfrom(raw_sock, buffer, sizeof(buffer), 0, NULL, NULL);
+        if (packet_size > 0) {
+            process_packet(buffer, (int)packet_size); 
         }
-
-        struct ether_header *eth = (struct ether_header *)buffer;
-        uint16_t etype = ntohs(eth->ether_type);
-        process_packet(buffer, etype); 
     }
 
     close(raw_sock);

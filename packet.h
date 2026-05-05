@@ -4,9 +4,8 @@
 #include <stdint.h>
 
 /**
- * process_packet — разобрать и вывести информацию о захваченном пакете.
- * @buffer: указатель на начало Ethernet-фрейма (весь пакет)
- * @etype:  EtherType из Ethernet-заголовка (в хостовом порядке байт)
+ * process_packet — разбирает пакет и выводит его содержимое.
+ * Теперь принимает полный размер packet_size для корректного вычисления полезной нагрузки.
  */
 void process_packet(const unsigned char *buffer, int packet_size);
 
